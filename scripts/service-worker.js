@@ -96,3 +96,25 @@ function clearAllSyncData() {
         }
     });
 }
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "fetchFavicon") {
+
+        const url = `https://favicons.seadfeng.workers.dev/${encodeURIComponent(msg.hostname)}.ico`;
+
+        fetch(url)
+            .then(r => r.arrayBuffer())
+            .then(buf => {
+                const base64 = btoa(
+                    String.fromCharCode(...new Uint8Array(buf))
+                );
+                sendResponse(`data:image/x-icon;base64,${base64}`);
+            })
+            .catch(err => {
+                console.error("Favicon fetch failed", err);
+                sendResponse(null);
+            });
+
+        return true; // keeps channel open
+    }
+});
