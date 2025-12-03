@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const LINK_SIZE = Math.floor(sizeLink * 16);
         
-        gridContainer.style.width = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
+        gridContainer.style.maxWidth = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
         gridContainer.innerHTML = '';
     }
 
@@ -779,7 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         GRID_COLS = result.grid.col || 8;
         const LINK_SIZE = Math.ceil(sizeLink) * 16;
-        gridContainer.style.width = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
+        gridContainer.style.maxWidth = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
     }
     
     async function setLinkSize() {
