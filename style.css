@@ -321,6 +321,9 @@ a {
     background: #3333336c;
     backdrop-filter: blur(6px);
 
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     text-decoration: none;
     color: inherit;
 
@@ -337,9 +340,6 @@ a {
 .quick-link .link-text {
     font-size: var(--text-link-size);
     text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     color: #fefefe;
 }
 
