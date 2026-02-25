@@ -72,7 +72,7 @@ function initialize() {
           links: links,
           showTutorial: true,
           defaultBGs: true,
-          linkSize: 11
+          linkSize: 15
         }, () => {
           console.log('Default data saved.');
           chrome.tabs.create({
@@ -98,16 +98,14 @@ function clearAllSyncData() {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.action === "fetchFavicon") {
 
+    if (msg.action === "fetchFavicon") {
         const url = `https://favicons.seadfeng.workers.dev/${encodeURIComponent(msg.hostname)}.ico`;
 
         fetch(url)
             .then(r => r.arrayBuffer())
             .then(buf => {
-                const base64 = btoa(
-                    String.fromCharCode(...new Uint8Array(buf))
-                );
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
                 sendResponse(`data:image/x-icon;base64,${base64}`);
             })
             .catch(err => {
@@ -115,6 +113,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 sendResponse(null);
             });
 
-        return true; // keeps channel open
+        return true; // Mantém o canal aberto para o fetch assíncrono
+    }
+
+    if (msg.action === "updateIcon") {
+        updateIcon(msg.isDark);
+        sendResponse({ status: "recebido" }); 
+        // Não precisa de 'return true' aqui porque updateIcon não é assíncrono
     }
 });
+
+function updateIcon(isDark) {
+    const iconVariant = isDark ? "-white" : "";
+
+    chrome.action.setIcon({
+        path: {
+            16: `../icons/icon${iconVariant}-16.png`,
+            32: `../icons/icon${iconVariant}-32.png`,
+            48: `../icons/icon${iconVariant}-48.png`,
+            96: `../icons/icon${iconVariant}-96.png`,
+            128: `../icons/icon${iconVariant}-128.png`
+        }
+    }, () => {
+        if (chrome.runtime.lastError) {
+            console.error("X [Service Worker] Erro ao trocar o ícone", chrome.runtime.lastError.message);
+        }
+    });
+}

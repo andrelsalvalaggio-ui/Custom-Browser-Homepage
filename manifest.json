@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Custom Browser Homepage",
-  "version": "3.0",
+  "version": "3.1",
   "description": "Replaces the browser's homepage with a custom page",
+
+  "action": {},
   
   "chrome_url_overrides": {
     "newtab": "homepage.html"
@@ -17,11 +19,12 @@
   ],
 
   "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },    
+    "16": "icons/icon-white-16.png",
+    "32": "icons/icon-white-32.png",
+    "48": "icons/icon-white-48.png",
+    "96": "icons/icon-white-96.png",
+    "128": "icons/icon-white-128.png"
+  },
 
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://favicons.seadfeng.workers.dev/"

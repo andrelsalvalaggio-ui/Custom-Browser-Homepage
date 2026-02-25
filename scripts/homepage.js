@@ -5,6 +5,40 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
+    function updateExtensionIcon(isDark) {
+    
+        chrome.runtime.sendMessage({
+            action: "updateIcon",
+            isDark: isDark
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.error("Erro ao enviar mensagem:", chrome.runtime.lastError.message);
+            }
+        });
+    }
+
+    function updateTabFavicon(isDark) {
+        const iconVariant = isDark ? "-white" : "";
+        let link = document.querySelector("link[rel~='icon']");
+        
+        if (!link) {
+            link = document.createElement('link');
+            link.rel = 'icon';
+            document.head.appendChild(link);
+        }
+        
+        link.href = `../icons/icon${iconVariant}-32.png`; 
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    updateExtensionIcon(mediaQuery.matches);
+    updateTabFavicon(mediaQuery.matches);
+
+    mediaQuery.addEventListener('change', (e) => {
+        updateTabFavicon(e.matches);
+        updateExtensionIcon(e.matches);
+    });
+
     async function init() {
         setGridDefaults();
         loadPosition();

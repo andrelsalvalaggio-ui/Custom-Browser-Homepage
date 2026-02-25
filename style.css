@@ -34,6 +34,10 @@ body, html {
     backdrop-filter: blur(6px);
 }
 
+.click-through {
+    pointer-events: none;
+}
+
 .notification-content {
     opacity: 0;
     bottom: 30px;
@@ -318,7 +322,7 @@ a {
     padding: 0.8em;
     border: 1px solid #6e6e6e6c;
     border-radius: 0.75rem;
-    background: #3333336c;
+    background: #3333332c;
     backdrop-filter: blur(6px);
 
     overflow: hidden;
