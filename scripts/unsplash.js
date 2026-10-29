@@ -3,8 +3,9 @@ const CACHE_KEY = 'unsplash_next_wallpaper';
 
 async function fetchFromProxy(query = 'nature') {
     try {
+        const queryParam = Array.isArray(query) ? query.join(',') : (query || 'nature');
         // Timestamp no query param para forçar a Cloudflare a NUNCA entregar cache
-        const response = await fetch(`${PROXY_URL}?query=${encodeURIComponent(query)}&_t=${Date.now()}`);
+        const response = await fetch(`${PROXY_URL}?query=${encodeURIComponent(queryParam)}&_t=${Date.now()}`);
 
         if (!response.ok) {
             throw new Error(`Erro Proxy: ${response.statusText}`);
@@ -13,7 +14,8 @@ async function fetchFromProxy(query = 'nature') {
         const data = await response.json();
 
         const screenWidth = window.innerWidth || 1920;
-        const highResUrl = `${data.rawUrl}&auto=format&fit=crop&w=${screenWidth}&q=80`;
+        const separator = data.rawUrl && data.rawUrl.includes('?') ? '&' : '?';
+        const highResUrl = `${data.rawUrl}${separator}auto=format&fit=crop&w=${screenWidth}&q=80`;
         const lowResUrl = data.smallUrl;
 
         return {
@@ -22,7 +24,8 @@ async function fetchFromProxy(query = 'nature') {
             lowResUrl,
             color: data.color,
             authorName: data.authorName,
-            authorProfile: data.authorProfile
+            authorProfile: data.authorProfile,
+            unsplashUrl: data.unsplashUrl || `https://unsplash.com/?utm_source=custom_homepage&utm_medium=referral`
         };
 
     } catch (error) {
@@ -37,11 +40,23 @@ function preloadImage(url) {
     img.src = url;
 }
 
+function getRandomQuery(queryOrQueries = 'nature') {
+    if (Array.isArray(queryOrQueries) && queryOrQueries.length > 0) {
+        const randomIndex = Math.floor(Math.random() * queryOrQueries.length);
+        return queryOrQueries[randomIndex] || 'nature';
+    }
+    if (typeof queryOrQueries === 'string' && queryOrQueries.trim()) {
+        return queryOrQueries.trim();
+    }
+    return 'nature';
+}
+
 let isPrefetching = false;
-async function prefetchNextWallpaper(query = 'nature', currentId = null) {
+async function prefetchNextWallpaper(queries = 'nature', currentId = null) {
     if (isPrefetching) return;
     isPrefetching = true;
     try {
+        const query = getRandomQuery(queries);
         let nextWallpaper = await fetchFromProxy(query);
 
         // Se por coincidência o Unsplash devolver a mesma foto, tenta mais uma vez
@@ -62,7 +77,15 @@ async function prefetchNextWallpaper(query = 'nature', currentId = null) {
     }
 }
 
-export async function getUnsplashWallpaper(query = 'nature') {
+export function clearUnsplashCache() {
+    try {
+        localStorage.removeItem(CACHE_KEY);
+    } catch (e) {
+        console.warn("Erro ao limpar cache local:", e);
+    }
+}
+
+export async function getUnsplashWallpaper(queries = 'nature') {
     let cached = null;
     try {
         const stored = localStorage.getItem(CACHE_KEY);
@@ -76,15 +99,16 @@ export async function getUnsplashWallpaper(query = 'nature') {
     // 1. Se já temos uma imagem em cache no localStorage (pré-carregada na aba anterior):
     if (cached && cached.highResUrl) {
         // Dispara em segundo plano a busca da PRÓXIMA imagem diferente para a próxima aba
-        setTimeout(() => prefetchNextWallpaper(query, cached.id), 200);
+        setTimeout(() => prefetchNextWallpaper(queries, cached.id), 200);
         return cached;
     }
 
     // 2. Se for o primeiro acesso e ainda não tiver cache:
+    const query = getRandomQuery(queries);
     const current = await fetchFromProxy(query);
     if (current) {
         // Já engatilha e guarda a próxima no localStorage
-        setTimeout(() => prefetchNextWallpaper(query, current.id), 500);
+        setTimeout(() => prefetchNextWallpaper(queries, current.id), 500);
     }
     return current;
 }

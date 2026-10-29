@@ -1,4 +1,4 @@
-import { getUnsplashWallpaper } from "./unsplash.js";
+import { getUnsplashWallpaper, clearUnsplashCache } from "./unsplash.js";
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -47,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadPosition();
         loadFullWidth();
         await loadUnsplashSetting();
+        await loadUnsplashThemesSetting();
+        initUnsplashThemeListeners();
         const result = await chrome.storage.sync.get('defaultBGs');
 
         if (result.defaultBGs) {
@@ -69,6 +71,28 @@ document.addEventListener('DOMContentLoaded', () => {
         initSortable();
     }
 
+    const photoCreditsEl = document.getElementById('photo-credits');
+    const photoAuthorLink = document.getElementById('photo-author-link');
+    const photoUnsplashLink = document.getElementById('photo-unsplash-link');
+
+    function setPhotoCredits(authorName, authorProfile, unsplashUrl) {
+        if (!photoCreditsEl || !photoAuthorLink || !photoUnsplashLink) return;
+        if (authorName && authorProfile) {
+            photoAuthorLink.textContent = authorName;
+            photoAuthorLink.href = authorProfile;
+            photoUnsplashLink.href = unsplashUrl || "https://unsplash.com/?utm_source=custom_homepage&utm_medium=referral";
+            photoCreditsEl.style.display = 'flex';
+        } else {
+            photoCreditsEl.style.display = 'none';
+        }
+    }
+
+    function hidePhotoCredits() {
+        if (photoCreditsEl) {
+            photoCreditsEl.style.display = 'none';
+        }
+    }
+
     async function loadBackground() {
         let idArray = await getIdArray();
         console.log('idArray: ', idArray);
@@ -80,7 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const useUnsplash = await getUseUnsplash();
 
         if (useUnsplash) {
-            const unsplash = await getUnsplashWallpaper();
+            const themes = await getActiveThemes();
+            const unsplash = await getUnsplashWallpaper(themes);
             if (unsplash) {
                 if (unsplash.color) {
                     document.body.style.backgroundColor = unsplash.color;
@@ -97,11 +122,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         document.body.style.backgroundImage = `url("${unsplash.highResUrl}")`;
                     };
                     imgLoader.onerror = async () => {
+                        hidePhotoCredits();
                         await applyCustomOrFallbackBackground(idArray, true);
                     };
                 }
+                setPhotoCredits(unsplash.authorName, unsplash.authorProfile, unsplash.unsplashUrl);
                 return;
             } else {
+                hidePhotoCredits();
                 // Unsplash falhou (servidor indisponível, limite atingido ou offline)
                 // Apenas se o Unsplash falhou E a lista estiver vazia, carrega as imagens padrão de fallback!
                 await applyCustomOrFallbackBackground(idArray, true);
@@ -109,12 +137,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        hidePhotoCredits();
         // Caso Unsplash esteja desligado pelo usuário:
         // Usa apenas os backgrounds do usuário. Se a lista estiver vazia, não força recarregar padrões.
         await applyCustomOrFallbackBackground(idArray, false);
     }
 
     async function applyCustomOrFallbackBackground(idArray, isUnsplashFallback) {
+        hidePhotoCredits();
         // Apenas se o Unsplash falhou E a lista está vazia, carrega as imagens padrão de fallback
         if (isUnsplashFallback && idArray.length === 0) {
             console.log('Unsplash falhou e lista vazia. Carregando backgrounds padrão de fallback.');
@@ -153,7 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
         await chrome.storage.local.set({ idArray: idArrayB });
         await chrome.storage.local.set({ [id]: imageSource });
 
-        addDisplayImage(id);
+        await addDisplayImage(id);
+        initSortableDisplay();
         console.log("New background:", id);
         return id;
     }
@@ -285,21 +316,23 @@ document.addEventListener('DOMContentLoaded', () => {
             iconImg.src = fallbackIcon; // Temporary placeholder
             
             chrome.storage.local.get({ icons: {} }, async (res) => {
-                if (res.icons && res.icons[iconId]) {
-                    // Found in cache
-                    iconImg.src = res.icons[iconId];
+                const icons = res.icons || {};
+                if (icons[iconId]) {
+                    if (icons[iconId] !== 'NOT_FOUND') {
+                        iconImg.src = icons[iconId];
+                    }
                 } else if (hostname) {
-                    // Not found, fetch it
                     try {
                         const base64 = await faviconToBase64(hostname);
+                        const cur = await chrome.storage.local.get({ icons: {} });
+                        const latestIcons = cur.icons || {};
                         if (base64) {
                             iconImg.src = base64;
-                            // Save to cache garantindo leitura do estado mais recente
-                            const cur = await chrome.storage.local.get({ icons: {} });
-                            const icons = cur.icons || {};
-                            icons[iconId] = base64;
-                            await chrome.storage.local.set({ icons });
+                            latestIcons[iconId] = base64;
+                        } else {
+                            latestIcons[iconId] = 'NOT_FOUND';
                         }
+                        await chrome.storage.local.set({ icons: latestIcons });
                     } catch (err) {
                         console.log("Error fetching favicon", err);
                     }
@@ -369,10 +402,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let editingLink = null;
     let editingId = null;
 
+    let linksSortableInstance = null;
+
     function removeLink(linkElement) {
         if (!linkElement) return hideContextMenu();
         const link = linkElement.closest('.quick-link');
         if (!link) return hideContextMenu();
+
+        const name = link.dataset.name || 'this website';
+        if (!confirm(`Are you sure you want to remove "${name}"?`)) {
+            return hideContextMenu();
+        }
 
         const id = link.dataset.id;
         link.remove();
@@ -413,8 +453,20 @@ document.addEventListener('DOMContentLoaded', () => {
         isEditing = true;
         activeLink = linkElement;
 
+        const titleElem = document.getElementById('overlay-title');
+        if (titleElem) titleElem.textContent = 'Edit Website';
+        const submitBtn = document.getElementById('btn-submit-link');
+        if (submitBtn) submitBtn.textContent = 'Save';
+
         document.getElementById('site-name').value = linkElement.dataset.name || '';
         document.getElementById('site-url').value = linkElement.href || '';
+
+        const removeCustomGroup = document.getElementById('remove-custom-icon-group');
+        const removeCustomCb = document.getElementById('remove-custom-icon-cb');
+        if (removeCustomGroup && removeCustomCb) {
+            removeCustomCb.checked = false;
+            removeCustomGroup.style.display = linkElement.dataset.hasCustomIcon === 'true' ? 'block' : 'none';
+        }
 
         showOverlay();
     }
@@ -443,6 +495,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!overlay) return;
         overlay.style.display = 'none';
         if (form) form.reset();
+        const titleElem = document.getElementById('overlay-title');
+        if (titleElem) titleElem.textContent = 'Add New Website';
+        const submitBtn = document.getElementById('btn-submit-link');
+        if (submitBtn) submitBtn.textContent = 'Add';
+        const removeCustomGroup = document.getElementById('remove-custom-icon-group');
+        if (removeCustomGroup) removeCustomGroup.style.display = 'none';
         isEditing = false;
         activeLink = null;
         editingLink = null;
@@ -457,11 +515,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function initSortable() {
         const container = document.getElementById('grid-container');
-        if(!container) return;
+        if (!container || typeof Sortable === 'undefined') return;
 
-        new Sortable(container, {
+        if (linksSortableInstance) {
+            linksSortableInstance.destroy();
+            linksSortableInstance = null;
+        }
+
+        linksSortableInstance = new Sortable(container, {
             animation: 150,
-            ghostClass: 'ghost',
+            ghostClass: 'link-ghost',
             group: {
                 name: 'grid',
                 pull: false,
@@ -492,16 +555,21 @@ document.addEventListener('DOMContentLoaded', () => {
         event.stopPropagation();
         activeLink = linkElement;
         
-        const menuWidth = contextMenu.offsetWidth;
-        const menuHeight = contextMenu.offsetHeight;
+        contextMenu.style.visibility = 'hidden';
+        contextMenu.style.display = 'flex';
+
+        const menuWidth = contextMenu.offsetWidth || 160;
+        const menuHeight = contextMenu.offsetHeight || 80;
         const windowWidth = window.innerWidth;
         const windowHeight = window.innerHeight;
         let x = event.clientX, y = event.clientY;
-        if (x + menuWidth > windowWidth) x = windowWidth - menuWidth;
-        if (y + menuHeight > windowHeight) y = windowHeight - menuHeight;
+        if (x + menuWidth > windowWidth) x = windowWidth - menuWidth - 10;
+        if (y + menuHeight > windowHeight) y = windowHeight - menuHeight - 10;
+        if (x < 10) x = 10;
+        if (y < 10) y = 10;
         contextMenu.style.top = `${y}px`;
         contextMenu.style.left = `${x}px`;
-        contextMenu.style.display = 'block';
+        contextMenu.style.visibility = 'visible';
     }
 
     form.addEventListener('submit', async (e) => {
@@ -520,16 +588,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let customIcon = null;
         if (file) {
+            if (file.size > 1024 * 1024) {
+                alert('The selected icon file exceeds the 1MB limit. Please choose a smaller file.');
+                return;
+            }
             try { customIcon = await convertToBase64(file); } catch (err) { console.error(err); }
         }
 
         if (isEditing && editingId) {
             // EDIT MODE
-            const existingCustomIcon = await getCustomIcon(editingId);
-            const updatedCustomIcon = customIcon || existingCustomIcon || null;
+            const removeCustomCb = document.getElementById('remove-custom-icon-cb');
+            let updatedCustomIcon = null;
 
-            if (customIcon) {
-                await saveCustomIcon(editingId, customIcon);
+            if (removeCustomCb && removeCustomCb.checked) {
+                await removeCustomIcon(editingId);
+                updatedCustomIcon = null;
+            } else {
+                const existingCustomIcon = await getCustomIcon(editingId);
+                updatedCustomIcon = customIcon || existingCustomIcon || null;
+                if (customIcon) {
+                    await saveCustomIcon(editingId, customIcon);
+                }
             }
 
             // Remove o ícone em cache para que a alteração de URL ou recarregamento busque o favicon novo
@@ -551,10 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Cleanup
-            isEditing = false;
-            activeLink = null;
-            editingLink = null;
-            editingId = null;
+            hideOverlay();
 
         } else {
             // NEW LINK MODE
@@ -576,8 +652,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     window.addEventListener('click', (e) => {
-        if (contextMenu.style.display === 'block' && !contextMenu.contains(e.target)) {
+        if (contextMenu.style.display === 'flex' && !contextMenu.contains(e.target)) {
             hideContextMenu();
+        }
+    });
+
+    window.addEventListener('contextmenu', (e) => {
+        if (contextMenu.style.display === 'flex' && !contextMenu.contains(e.target)) {
+            hideContextMenu();
+        }
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (overlay && overlay.style.display === 'flex') {
+                hideOverlay();
+            }
+            if (settingsMenu && settingsMenu.style.display === 'flex') {
+                closeMenu();
+            }
+            if (contextMenu && contextMenu.style.display === 'flex') {
+                hideContextMenu();
+            }
+            const tut = document.getElementById('tutorial');
+            if (tut && tut.style.display === 'block') {
+                hideTutorialHighlight();
+            }
         }
     });
 
@@ -625,6 +725,18 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.sync.set({ showTutorial: false });
     }
 
+    const tutorialElem = document.getElementById('tutorial');
+    if (tutorialElem) {
+        tutorialElem.addEventListener('click', hideTutorialHighlight);
+    }
+
+    window.addEventListener('resize', () => {
+        const tut = document.getElementById('tutorial');
+        if (tut && tut.style.display === 'block') {
+            showTutorialHighlight();
+        }
+    });
+
     chrome.storage.sync.get(['showTutorial'], (result) => {
         if (result.showTutorial) {
             showTutorialHighlight();
@@ -661,6 +773,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const linkSizeInput = document.getElementById('link-size-input');
     const widthCheckbox = document.getElementById('width-checkbox');
     const unsplashCheckbox = document.getElementById('unsplash-checkbox');
+    const unsplashThemesSection = document.getElementById('unsplash-themes-section');
     const customBgSection = document.getElementById('custom-bg-section');
     const clockCheckbox = document.getElementById('clock-checkbox');
     const clockPositionGrid = document.getElementById('clock-position-grid');
@@ -699,11 +812,14 @@ document.addEventListener('DOMContentLoaded', () => {
             customIcon: customIcons[link.id] || null
         }));
 
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+        const jsonString = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([jsonString], { type: "application/json" });
+        const blobUrl = URL.createObjectURL(blob);
         const dlAnchorElem = document.getElementById('downloadAnchorElem');
-        dlAnchorElem.setAttribute("href", dataStr);
+        dlAnchorElem.setAttribute("href", blobUrl);
         dlAnchorElem.setAttribute("download", "websiteLinks.json");
         dlAnchorElem.click();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
     };
 
     const importLinks = () => {
@@ -713,6 +829,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const importLinksInput = () => {
         const files = fileInput.files;
         if (!files || files.length === 0) return false;
+
+        if (!confirm('Importing websites will replace your current links list. Do you want to proceed?')) {
+            fileInput.value = '';
+            return false;
+        }
 
         const fr = new FileReader();
         fr.onload = async () => {
@@ -748,11 +869,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 await loadLinks();
                 closeMenu();
-                fileInput.value = '';
                 showNotification("Success. Links imported successfully");
             } catch (err) {
                 console.error("Invalid JSON file:", err);
                 showNotification("Error: Invalid JSON file");
+            } finally {
+                fileInput.value = '';
             }
         };
         fr.readAsText(files[0]);
@@ -787,13 +909,19 @@ document.addEventListener('DOMContentLoaded', () => {
         changeBgInput.value = '';
     }
 
+    let displaySortableInstance = null;
     function initSortableDisplay() {
         const container = document.getElementById('img-display-container');
-        if(!container) return; 
+        if(!container || typeof Sortable === 'undefined') return; 
 
-        new Sortable(container, {
+        if (displaySortableInstance) {
+            displaySortableInstance.destroy();
+            displaySortableInstance = null;
+        }
+
+        displaySortableInstance = new Sortable(container, {
             animation: 150,
-            ghostClass: 'ghost',
+            ghostClass: 'link-ghost',
             group: {
                 name: 'backgrounds-settings',
                 pull: false,
@@ -811,7 +939,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadImageDisplay(idArray) {
-        if (displayContainer && displayContainer.childElementCount === 0) {
+        if (displayContainer) {
+            displayContainer.innerHTML = '';
             for (let i = 0; i < idArray.length; i++) {
                 await addDisplayImage(idArray[i]);
             }
@@ -821,29 +950,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function addDisplayImage(id) {
         const imgSrc = await getBackground(id);
+        if (!imgSrc) return;
 
         const divElem = document.createElement('div');
         divElem.style.position = 'relative';
         divElem.className = 'div-display';
         divElem.id = id;
 
-        const aElem = document.createElement('button');
+        const aElem = document.createElement('div');
         aElem.className = 'img-display-a';
 
         const btnElem = document.createElement('img');
         btnElem.className = 'img-display-btn';
         btnElem.src = 'icons/svg/trash.svg';
+        btnElem.alt = 'Remove background';
+        btnElem.title = 'Remove this background';
 
         const imgElem = document.createElement('img');
         imgElem.src = imgSrc;
         imgElem.className = 'img-display-back';
+        imgElem.alt = 'Background thumbnail';
 
         aElem.appendChild(imgElem);
         aElem.appendChild(btnElem);
         divElem.appendChild(aElem);
         displayContainer.appendChild(divElem);
 
-        aElem.addEventListener('click', () => removeBg(divElem.id));
+        btnElem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm('Are you sure you want to remove this background image?')) {
+                removeBg(divElem.id);
+            }
+        });
     }
 
     async function removeDisplayImage(id) {
@@ -862,22 +1000,39 @@ document.addEventListener('DOMContentLoaded', () => {
         await clearBgList();
         if(displayContainer) displayContainer.innerHTML = '';
         await loadDefaultBackgrounds();
-        loadBackground();
+        initSortableDisplay();
+        await chrome.storage.sync.set({
+            unsplashThemes: ['nature'],
+            unsplashCustomTheme: '',
+            unsplashCustomEnabled: false
+        });
+        await loadUnsplashThemesSetting();
+        await loadBackground();
     }
 
+    let notifTimer = null;
     function showNotification(message) {
         const notif = document.getElementById('notification');
         if(!notif) return;
         document.getElementById('notif-message').innerText = message;
         notif.style.opacity = "1";
-        setTimeout(() => {
+        notif.style.pointerEvents = "auto";
+        if (notifTimer) clearTimeout(notifTimer);
+        notifTimer = setTimeout(() => {
             closeNotification();
-        }, 3000);
+        }, 3500);
     }
 
     function closeNotification() {
         const notif = document.getElementById('notification');
-        if(notif) notif.style.opacity = "0";
+        if(notif) {
+            notif.style.opacity = "0";
+            notif.style.pointerEvents = "none";
+        }
+        if (notifTimer) {
+            clearTimeout(notifTimer);
+            notifTimer = null;
+        }
     }
 
     async function removeBg(id) {
@@ -887,6 +1042,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await chrome.storage.local.set({ idArray: idArrayB });
         chrome.storage.local.remove(id);
         removeDisplayImage(id);
+        await loadBackground();
     }
 
     function setGridDefaults() {
@@ -942,41 +1098,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const clearBg = async () => {
-        await clearBgList();
-        document.body.style.backgroundImage = 'none';
-        showNotification('Success. Background list cleared successfully');
-        if(displayContainer) displayContainer.innerHTML = '';
+        if (confirm('Are you sure you want to clear all background images?')) {
+            await clearBgList();
+            document.body.style.backgroundImage = 'none';
+            hidePhotoCredits();
+            showNotification('Success. Background list cleared successfully');
+            if(displayContainer) displayContainer.innerHTML = '';
+            await loadBackground();
+        }
     }
 
     const linkSize = async () => {
-        const linkSize = linkSizeInput.value;
-        const sizeLink = linkSize * 0.47;
-        const sizeText = linkSize * 0.07;
+        const linkSizeVal = linkSizeInput.value;
+        const sizeLink = linkSizeVal * 0.47;
+        const sizeText = linkSizeVal * 0.07;
 
-        await chrome.storage.sync.set({ linkSize: linkSize });
+        await chrome.storage.sync.set({ linkSize: linkSizeVal });
 
         document.documentElement.style.setProperty("--link-size", sizeLink + "rem");
         document.documentElement.style.setProperty("--text-link-size", sizeText + "em");
 
         const result = await chrome.storage.sync.get('grid');
-        GRID_COLS = result.grid.col || 8;
-        const LINK_SIZE = Math.ceil(sizeLink) * 16;
+        GRID_COLS = result.grid ? (result.grid.col || 8) : 8;
+        const LINK_SIZE = Math.floor(sizeLink * 16);
         gridContainer.style.maxWidth = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
         updateSameCornerWidth();
     }
 
     async function setLinkSize() {
-        const linkSize = await getLinkSize();
-        linkSizeInput.value = linkSize;
-        const sizeLink = linkSize * 0.47;
-        const sizeText = linkSize * 0.07;
+        const linkSizeVal = await getLinkSize();
+        linkSizeInput.value = linkSizeVal;
+        const sizeLink = linkSizeVal * 0.47;
+        const sizeText = linkSizeVal * 0.07;
         document.documentElement.style.setProperty("--link-size", sizeLink + "rem");
         document.documentElement.style.setProperty("--text-link-size", sizeText + "em");
     }
 
     async function getLinkSize() {
         const result = await chrome.storage.sync.get('linkSize');
-        return result.linkSize || 7;
+        return result.linkSize !== undefined ? result.linkSize : 15;
     }
 
     // ==========================================================================
@@ -1263,6 +1423,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 customBgSection.classList.remove('disabled-section');
             }
         }
+        if (unsplashThemesSection) {
+            if (isUnsplash) {
+                unsplashThemesSection.classList.remove('disabled-section');
+            } else {
+                unsplashThemesSection.classList.add('disabled-section');
+            }
+        }
         if (unsplashCheckbox) {
             unsplashCheckbox.checked = isUnsplash;
         }
@@ -1271,6 +1438,155 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadUnsplashSetting() {
         const isUnsplash = await getUseUnsplash();
         updateBgSettingsUI(isUnsplash);
+    }
+
+    async function getActiveThemes() {
+        const { unsplashThemes, unsplashCustomTheme, unsplashCustomEnabled } =
+            await chrome.storage.sync.get(['unsplashThemes', 'unsplashCustomTheme', 'unsplashCustomEnabled']);
+
+        const selectedThemes = Array.isArray(unsplashThemes) && unsplashThemes.length > 0
+            ? [...unsplashThemes]
+            : ['nature'];
+
+        if (unsplashCustomEnabled && unsplashCustomTheme && unsplashCustomTheme.trim()) {
+            selectedThemes.push(unsplashCustomTheme.trim());
+        }
+
+        return selectedThemes.length > 0 ? selectedThemes : ['nature'];
+    }
+
+    async function loadUnsplashThemesSetting() {
+        const { unsplashThemes, unsplashCustomTheme, unsplashCustomEnabled } =
+            await chrome.storage.sync.get(['unsplashThemes', 'unsplashCustomTheme', 'unsplashCustomEnabled']);
+
+        const activeThemes = Array.isArray(unsplashThemes) && unsplashThemes.length > 0
+            ? unsplashThemes
+            : ['nature'];
+
+        const themeCheckboxes = document.querySelectorAll('.theme-checkbox:not(#custom-theme-checkbox)');
+        themeCheckboxes.forEach(cb => {
+            const isChecked = activeThemes.includes(cb.value);
+            cb.checked = isChecked;
+            const parent = cb.closest('.theme-item');
+            if (parent) parent.classList.toggle('checked', isChecked);
+        });
+
+        const customCb = document.getElementById('custom-theme-checkbox');
+        const customInput = document.getElementById('custom-theme-input');
+        if (customCb) {
+            customCb.checked = !!unsplashCustomEnabled;
+            const parent = customCb.closest('.theme-item');
+            if (parent) parent.classList.toggle('checked', !!unsplashCustomEnabled);
+        }
+        if (customInput && unsplashCustomTheme !== undefined) {
+            customInput.value = unsplashCustomTheme;
+        }
+    }
+
+    async function saveUnsplashThemes() {
+        const themeCheckboxes = document.querySelectorAll('.theme-checkbox:not(#custom-theme-checkbox)');
+        const selectedThemes = [];
+        themeCheckboxes.forEach(cb => {
+            if (cb.checked) {
+                selectedThemes.push(cb.value);
+            }
+        });
+
+        const customCb = document.getElementById('custom-theme-checkbox');
+        const customInput = document.getElementById('custom-theme-input');
+        const customEnabled = customCb ? customCb.checked : false;
+        const customText = customInput ? customInput.value.trim() : '';
+
+        // If nothing is selected and custom is not enabled/empty, default back to 'nature'
+        if (selectedThemes.length === 0 && (!customEnabled || !customText)) {
+            selectedThemes.push('nature');
+            const natureCb = document.querySelector('.theme-checkbox[value="nature"]');
+            if (natureCb) {
+                natureCb.checked = true;
+                natureCb.closest('.theme-item')?.classList.toggle('checked', true);
+            }
+        }
+
+        await chrome.storage.sync.set({
+            unsplashThemes: selectedThemes,
+            unsplashCustomEnabled: customEnabled,
+            unsplashCustomTheme: customText
+        });
+    }
+
+    let themeChangeDebounce = null;
+    function triggerThemeChange(immediate = false) {
+        clearTimeout(themeChangeDebounce);
+        const delay = immediate ? 50 : 750;
+        themeChangeDebounce = setTimeout(async () => {
+            await saveUnsplashThemes();
+            const useUnsplash = await getUseUnsplash();
+            if (useUnsplash) {
+                clearUnsplashCache();
+                await loadBackground();
+            }
+        }, delay);
+    }
+
+    function initUnsplashThemeListeners() {
+        const themeCheckboxes = document.querySelectorAll('.theme-checkbox:not(#custom-theme-checkbox)');
+        const customCb = document.getElementById('custom-theme-checkbox');
+        const customInput = document.getElementById('custom-theme-input');
+
+        themeCheckboxes.forEach(cb => {
+            cb.addEventListener('change', () => {
+                const parent = cb.closest('.theme-item');
+                if (parent) parent.classList.toggle('checked', cb.checked);
+
+                const anyBuiltinChecked = Array.from(themeCheckboxes).some(c => c.checked);
+                const isCustomValid = customCb?.checked && customInput?.value.trim().length > 0;
+
+                if (!anyBuiltinChecked && !isCustomValid) {
+                    cb.checked = true;
+                    if (parent) parent.classList.add('checked');
+                    showNotification("At least one theme must be selected.");
+                    return;
+                }
+
+                triggerThemeChange(true);
+            });
+        });
+
+        if (customCb) {
+            customCb.addEventListener('change', () => {
+                const parent = customCb.closest('.theme-item');
+                if (parent) parent.classList.toggle('checked', customCb.checked);
+
+                if (customCb.checked && customInput && !customInput.value.trim()) {
+                    customInput.focus();
+                }
+
+                const anyBuiltinChecked = Array.from(themeCheckboxes).some(c => c.checked);
+                if (!anyBuiltinChecked && !customCb.checked) {
+                    customCb.checked = true;
+                    if (parent) parent.classList.add('checked');
+                    showNotification("At least one theme must be selected.");
+                    return;
+                }
+
+                triggerThemeChange(true);
+            });
+        }
+
+        if (customInput) {
+            customInput.addEventListener('input', () => {
+                if (customInput.value.trim().length > 0 && customCb && !customCb.checked) {
+                    customCb.checked = true;
+                    const parent = customCb.closest('.theme-item');
+                    if (parent) parent.classList.add('checked');
+                }
+                triggerThemeChange(false);
+            });
+
+            customInput.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
     }
 
     const toggleUnsplash = async () => {

@@ -59,9 +59,15 @@ async function initialize(isInstall = false) {
           linkSize: 15
         });
         console.log('Default data saved.');
-        chrome.tabs.create({
-          url: 'chrome://newtab'
-        });
+        try {
+          chrome.tabs.create({
+            url: 'chrome://newtab'
+          });
+        } catch (err) {
+          chrome.tabs.create({
+            url: chrome.runtime.getURL('homepage.html')
+          });
+        }
       }
     } else {
       console.log('Sync storage is NOT empty.');
@@ -97,11 +103,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 // Icon Horse API: obtém o melhor favicon disponível para o domínio (PNG/ICO em alta qualidade)
                 const iconHorseUrl = `https://icon.horse/icon/${encodeURIComponent(cleanHostname)}`;
                 
-                let imgRes = await fetch(iconHorseUrl);
+                let imgRes = null;
+                try {
+                    imgRes = await fetch(iconHorseUrl);
+                } catch (e) {
+                    console.warn(`Icon Horse inacessível para ${cleanHostname}, tentando Google S2...`);
+                }
                 
-                // Fallback no Google S2 caso o Icon Horse falhe
+                // Fallback no Google S2 caso o Icon Horse falhe ou não retorne ok
                 if (!imgRes || !imgRes.ok) {
-                    imgRes = await fetch(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(cleanHostname)}&sz=128`);
+                    try {
+                        imgRes = await fetch(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(cleanHostname)}&sz=128`);
+                    } catch (e) {
+                        console.warn(`Google S2 falhou para ${cleanHostname}:`, e);
+                    }
                 }
 
                 if (!imgRes || !imgRes.ok) {
