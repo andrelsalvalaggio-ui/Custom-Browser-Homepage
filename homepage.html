@@ -8,20 +8,31 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+    <script type="module" src="scripts/homepage.js"></script>
 </head>
 <body>
     <div class="background-overlay">
         <div class="boxed">
-            <script src="scripts\Sortable.min.js"></script>
+            <script src="scripts/Sortable.min.js"></script>
 
-            <div class="links-container container">
-                <div class="links">
-                    <div id="grid-container" class="grid-container">
-                        <!-- Grid cells will be created by JavaScript -->
-                    </div>
-                    <button id="add-link-btn" class="fab fab-absolute">+</button>
+            <!-- Corner Containers: Clock (top-right default) and Links (top-left default) -->
+            <div id="clock-corner-container" class="corner-container pos-top-right">
+                <div id="clock-container" class="clock-container">
+                    <div id="clock-time" class="clock-time">00:00</div>
                 </div>
             </div>
+
+            <div id="links-corner-container" class="corner-container pos-top-left">
+                <div id="links-container" class="links-container container">
+                    <div class="links">
+                        <div id="grid-container" class="grid-container">
+                            <!-- Grid cells will be created by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="add-link-btn" class="fab fab-absolute">+</button>
 
             <div id="add-link-overlay" class="overlay">
                 <div class="overlay-content">
@@ -93,13 +104,23 @@
                     <div class="settings-left settings-side">
                         <button id="close-settings-btn" class="close-btn">&times;</button>
                         
-                        <div class="settings-section" >
+                        <div class="settings-section">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <h3>Random Unsplash Wallpaper</h3>
+                                <input type="checkbox" id="unsplash-checkbox" class="checkbox file-input">
+                            </div>
+                            <small class="file-hint">
+                                Automatically fetch high quality wallpapers from Unsplash.
+                            </small>
+                        </div>
+
+                        <div id="custom-bg-section" class="settings-section">
                             <h3>Change Background Pictures</h3>
                             <input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.gif,image/x-icon,image/png,image/jpeg,image/gif" id="change-bg-input" class="hidden file-input" multiple/>
                             <div id="img-display-container" class="settings-container"></div>
                             <div style="display: flex; gap:10px">
                                 <button id="change-bg-btn" class="context-menu-btn change-btn">
-                                    <img src="icons\svg\picture-svgrepo-com.svg" alt="" class="icons">
+                                    <img src="icons/svg/picture-svgrepo-com.svg" alt="" class="icons">
                                     Add a Background Image
                                 </button>
                                 <button id="clear-list-btn" class="context-menu-btn clear-btn">
@@ -121,11 +142,11 @@
                                     <div class="form-group settings-form">
                                         <div style="display: flex;">
                                             <button id="min-col" class="grid-button">
-                                                <img src="icons\svg\arrow-left-svgrepo-com.svg" alt="" class="arrow-icon">
+                                                <img src="icons/svg/arrow-left-svgrepo-com.svg" alt="" class="arrow-icon">
                                             </button>
                                             <input type="number" min="0" max="15" id="col" class=" "/>
                                             <button id="max-col" class="grid-button">
-                                                <img src="icons\svg\arrow-right-svgrepo-com.svg" alt="" class="arrow-icon">
+                                                <img src="icons/svg/arrow-right-svgrepo-com.svg" alt="" class="arrow-icon">
                                             </button>
                                         </div>
                                     </div>
@@ -139,36 +160,71 @@
                         
                     </div>
                     <div class="settings-right settings-side">
-                        <div style="display: flex; gap: 30px;">
-                            <div class="settings-section" >
+                        <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
+                            <div class="settings-section">
                                 <h3>Website's Links Position</h3>
-                                <div class="position-grid">
+                                <div class="position-grid" id="links-position-grid">
                                     <button id="top-left-btn" data-position="top-left" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\top-left.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/top-left.svg" alt="" class="icons">
                                     </button>
                                     <button id="top-center-btn" data-position="top-center" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\top-center.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/top-center.svg" alt="" class="icons">
                                     </button>
                                     <button id="top-right-btn" data-position="top-right" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\top-right.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/top-right.svg" alt="" class="icons">
                                     </button>
                                     <button id="left-btn" data-position="left" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\left.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/left.svg" alt="" class="icons">
                                     </button>
                                     <button id="center-btn" data-position="center" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\center.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/center.svg" alt="" class="icons">
                                     </button>
                                     <button id="right-btn" data-position="right" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\right.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/right.svg" alt="" class="icons">
                                     </button>
                                     <button id="bottom-left-btn" data-position="bottom-left" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\bottom-left.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/bottom-left.svg" alt="" class="icons">
                                     </button>
                                     <button id="bottom-center-btn" data-position="bottom-center" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\bottom-center.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/bottom-center.svg" alt="" class="icons">
                                     </button>
                                     <button id="bottom-right-btn" data-position="bottom-right" class="position-btn context-menu-btn">
-                                    <img src="icons\svg\align\bottom-right.svg" alt="" class="icons">
+                                    <img src="icons/svg/align/bottom-right.svg" alt="" class="icons">
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="settings-section" id="clock-settings-section">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <h3>Clock</h3>
+                                    <input type="checkbox" id="clock-checkbox" class="checkbox file-input" checked>
+                                </div>
+                                <div class="position-grid" id="clock-position-grid">
+                                    <button id="clock-top-left-btn" data-position="top-left" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/top-left.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-top-center-btn" data-position="top-center" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/top-center.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-top-right-btn" data-position="top-right" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/top-right.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-left-btn" data-position="left" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/left.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-center-btn" data-position="center" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/center.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-right-btn" data-position="right" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/right.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-bottom-left-btn" data-position="bottom-left" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/bottom-left.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-bottom-center-btn" data-position="bottom-center" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/bottom-center.svg" alt="" class="icons">
+                                    </button>
+                                    <button id="clock-bottom-right-btn" data-position="bottom-right" class="clock-position-btn context-menu-btn">
+                                    <img src="icons/svg/align/bottom-right.svg" alt="" class="icons">
                                     </button>
                                 </div>
                             </div>
@@ -182,13 +238,13 @@
                             <h3>Import/Export Website's Links</h3>
                             <input value="Import" type="file" id="selectFiles" accept=".json" class="hidden file-input"/>
                             <button id="import-links-btn" class="context-menu-btn">
-                                <img src="icons\svg\import-svgrepo-com.svg" alt="" class="icons">
+                                <img src="icons/svg/import-svgrepo-com.svg" alt="" class="icons">
                                 Import Websites
                             </button>
                             
                             <a id="downloadAnchorElem" style="display:none"></a>
                             <button id="export-links-btn" class="context-menu-btn">
-                                <img src="icons\svg\export-svgrepo-com.svg" alt="" class="icons">
+                                <img src="icons/svg/export-svgrepo-com.svg" alt="" class="icons">
                                 Export Websites
                             </button>
                         </div>
@@ -197,11 +253,11 @@
                         <div class="settings-section" >
                             <h3>Reset Settings</h3>
                             <button id="reset-bg-settings-btn" class="context-menu-btn remove">
-                                <img src="icons\svg\reset-forward-svgrepo-com.svg" alt="" class="icons">
+                                <img src="icons/svg/reset-forward-svgrepo-com.svg" alt="" class="icons">
                                 Reset Background
                             </button>
                             <button id="reset-links-settings-btn" class="context-menu-btn remove">
-                                <img src="icons\svg\reset-forward-svgrepo-com.svg" alt="" class="icons">
+                                <img src="icons/svg/reset-forward-svgrepo-com.svg" alt="" class="icons">
                                 Reset Websites
                             </button>
                         </div>
@@ -213,7 +269,6 @@
                 <span id="notif-message">Olá está é uma notificação!</span>
                 <button id="close-notification-btn" class="notification-btn close-btn">&times;</button>
             </div>
-            <script src="scripts/homepage.js"></script>
         </div>
     </div>  
 </body>

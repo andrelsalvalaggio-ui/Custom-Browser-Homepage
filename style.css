@@ -18,6 +18,8 @@ body, html {
     --link-container-vertical: flex-start;
     --link-container-horizontal: flex-start;
     --box-width: 1920px;
+
+    --bg-menu: #3333332c;
 }
 
 
@@ -30,7 +32,7 @@ body, html {
     border-radius: 12px;
     height: fit-content;
     z-index: 500;
-    background: #3333332c;
+    background: var(--bg-menu);
     backdrop-filter: blur(6px);
 }
 
@@ -58,9 +60,9 @@ body, html {
 .boxed {
     width: 100%;
     max-width: var(--box-width);
-    display: flex;
-    align-content: flex-start;
-    justify-content: flex-end;
+    height: 100%;
+    position: relative;
+    box-sizing: border-box;
 }
 
 .background-overlay {
@@ -75,10 +77,9 @@ body, html {
 .container {
     display: flex;
     flex-direction: column;
-    row-gap: 40px;
-    padding: 2rem;
+    row-gap: 20px;
     border-radius: 12px;
-    width: 100%;
+    box-sizing: border-box;
 }
 
 .hidden {
@@ -96,7 +97,7 @@ body, html {
 .fab {
     width: 56px;
     height: 56px;
-    background: #3333336c;
+    background: var(--bg-menu);
     backdrop-filter: blur(6px);
     border: solid 1px #6e6e6e6c;
     color: white;
@@ -288,7 +289,7 @@ a {
     border-color: transparent;
     outline-offset: -2px;
     border-radius: 12px;
-    background: #33333310;
+    background: var(--bg-menu);
     backdrop-filter: blur(3px);
     opacity: 1;
 }
@@ -322,7 +323,7 @@ a {
     padding: 0.8em;
     border: 1px solid #6e6e6e6c;
     border-radius: 0.75rem;
-    background: #3333332c;
+    background: var(--bg-menu);
     backdrop-filter: blur(6px);
 
     overflow: hidden;
@@ -402,7 +403,7 @@ a {
     position: absolute;
     z-index: 1000;
     width: 160px; /* Um pouco mais de espaço */
-    background: #2c2c2c6c;
+    background: var(--bg-menu);
     backdrop-filter: blur(6px);
     border: solid 1px #6161616c;
     border-radius: 8px;
@@ -587,6 +588,66 @@ h3 {
 }
 
 
+/* --- Créditos do Fotógrafo (Unsplash) --- */
+.photo-credits {
+    position: fixed;
+    bottom: 30px;
+    left: 30px;
+    z-index: 300;
+    height: 56px;
+    background: var(--bg-menu);
+    backdrop-filter: blur(6px);
+    border: solid 1px #6e6e6e6c;
+    border-radius: 28px;
+    padding: 0 20px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+    max-width: 320px;
+    user-select: none;
+}
+
+.photo-credits:hover {
+    background-color: #64636338;
+}
+
+.photo-credits-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #ffffff;
+    text-decoration: none;
+    font-size: 14px;
+    font-family: inherit;
+    width: 100%;
+    overflow: hidden;
+}
+
+.photo-credits-icon {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    flex-shrink: 0;
+}
+
+.photo-credits-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.photo-credits-label {
+    opacity: 0.8;
+    margin-right: 4px;
+    font-weight: 300;
+}
+
+.photo-credits-artist {
+    font-weight: 600;
+}
+
 .notification-btn {
     top: 50%;
     right: 15px;
@@ -675,15 +736,211 @@ input[type=number]::-webkit-inner-spin-button {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 5px;
-    max-width: 100px;
+    width: 100px;
+}
+
+#settings-menu .position-grid .context-menu-btn {
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    width: 30px;
+    height: 30px;
+    box-sizing: border-box;
+}
+
+#settings-menu .position-grid .context-menu-btn.active {
+    background-color: rgba(255, 255, 255, 0.28);
+    border-color: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
+}
+
+#settings-menu .position-grid .context-menu-btn .icons {
+    width: 18px;
+    height: 18px;
 }
 
 .links-container {
-    align-content: flex-end;
-    justify-content: var(--link-container-vertical);
+    display: flex;
+    flex-direction: column;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0;
 }
+
+/* ==========================================================================
+   Corner Containers & Layout System (Clock & Links Positioning)
+   ========================================================================== */
+
+.corner-container {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-sizing: border-box;
+    z-index: 10;
+    width: fit-content;
+    max-width: calc(100% - 4rem);
+    pointer-events: auto;
+}
+
+/* Div compartilhada quando o relógio e os links estão no mesmo canto */
+.corner-container.same-corner {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-sizing: border-box;
+}
+
+.corner-container.same-corner .clock-container,
+.corner-container.same-corner .links-container {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 9 Posições de Alinhamento */
+.pos-top-left {
+    top: 2rem;
+    left: 2rem;
+    align-items: flex-start;
+    text-align: left;
+}
+
+.pos-top-center {
+    top: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    align-items: center;
+    text-align: center;
+}
+
+.pos-top-right {
+    top: 2rem;
+    right: 2rem;
+    align-items: flex-end;
+    text-align: right;
+}
+
+.pos-left {
+    top: 50%;
+    left: 2rem;
+    transform: translateY(-50%);
+    align-items: flex-start;
+    text-align: left;
+}
+
+.pos-center {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    align-items: center;
+    text-align: center;
+}
+
+.pos-right {
+    top: 50%;
+    right: 2rem;
+    transform: translateY(-50%);
+    align-items: flex-end;
+    text-align: right;
+}
+
+.pos-bottom-left {
+    bottom: 2rem;
+    left: 2rem;
+    align-items: flex-start;
+    text-align: left;
+}
+
+.pos-bottom-center {
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    align-items: center;
+    text-align: center;
+}
+
+.pos-bottom-right {
+    bottom: 2rem;
+    right: 2rem;
+    align-items: flex-end;
+    text-align: right;
+}
+
+/* Alinhamento do grid de links de acordo com a posição */
+.pos-top-left .grid-container,
+.pos-left .grid-container,
+.pos-bottom-left .grid-container {
+    justify-content: flex-start;
+    margin: 0;
+}
+
+.pos-top-center .grid-container,
+.pos-center .grid-container,
+.pos-bottom-center .grid-container {
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.pos-top-right .grid-container,
+.pos-right .grid-container,
+.pos-bottom-right .grid-container {
+    justify-content: flex-end;
+    margin: 0 0 0 auto;
+}
+
+/* Estilos do Componente de Relógio */
+.clock-container {
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    cursor: default;
+    transition: opacity 0.2s ease;
+}
+
+.pos-top-left .clock-container,
+.pos-left .clock-container,
+.pos-bottom-left .clock-container {
+    align-items: flex-start;
+    text-align: left;
+}
+
+.pos-top-center .clock-container,
+.pos-center .clock-container,
+.pos-bottom-center .clock-container {
+    align-items: center;
+    text-align: center;
+}
+
+.pos-top-right .clock-container,
+.pos-right .clock-container,
+.pos-bottom-right .clock-container {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.clock-time {
+    font-size: 4.5rem;
+    font-weight: 600;
+    line-height: 1;
+    color: #ffffff;
+    font-family: Outfit, Arial, sans-serif;
+    letter-spacing: -1.5px;
+    text-shadow: 0 2px 32px rgba(0, 0, 0, 0.45);
+}
+
+
 
 .checkbox {
     width: 30px;
     height: 30px;
+}
+.disabled-section {
+    opacity: 0.35;
+    filter: grayscale(100%);
+    pointer-events: none;
+    user-select: none;
+    cursor: not-allowed;
+    transition: opacity 0.2s ease, filter 0.2s ease;
 }

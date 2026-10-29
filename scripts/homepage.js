@@ -1,3 +1,5 @@
+import { getUnsplashWallpaper } from "./unsplash.js";
+
 document.addEventListener('DOMContentLoaded', () => {
 
     if (!chrome?.storage?.sync) {
@@ -27,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.head.appendChild(link);
         }
         
-        link.href = `../icons/icon${iconVariant}-32.png`; 
+        link.href = `icons/icon${iconVariant}-32.png`; 
     }
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -40,16 +42,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function init() {
+        initClock();
         setGridDefaults();
-        loadPosition();
+        await loadPosition();
         loadFullWidth();
+        await loadUnsplashSetting();
         const result = await chrome.storage.sync.get('defaultBGs');
 
         if (result.defaultBGs) {
             await resetBack();
             await chrome.storage.sync.set({ defaultBGs: false });
         } else {
-            loadBackground();
+            await loadBackground();
+        }
+
+        // Migração/Limpeza do cache de favicons antigos para uso do Icon Horse (alta qualidade com CORS)
+        const FAVICON_CACHE_KEY = 'icon_horse_v1';
+        const { faviconCacheVersion } = await chrome.storage.local.get('faviconCacheVersion');
+        if (faviconCacheVersion !== FAVICON_CACHE_KEY) {
+            console.log('Migrando cache de favicons para Icon Horse...');
+            await chrome.storage.local.remove('icons');
+            await chrome.storage.local.set({ faviconCacheVersion: FAVICON_CACHE_KEY });
         }
 
         await loadLinks();
@@ -57,21 +70,74 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadBackground() {
-        const idArray = await getIdArray();
+        let idArray = await getIdArray();
         console.log('idArray: ', idArray);
+
+        if (idArray.length > 0) {
+            loadImageDisplay(idArray);
+        }
+
+        const useUnsplash = await getUseUnsplash();
+
+        if (useUnsplash) {
+            const unsplash = await getUnsplashWallpaper();
+            if (unsplash) {
+                if (unsplash.color) {
+                    document.body.style.backgroundColor = unsplash.color;
+                }
+
+                const imgLoader = new Image();
+                imgLoader.src = unsplash.highResUrl;
+
+                if (imgLoader.complete) {
+                    document.body.style.backgroundImage = `url("${unsplash.highResUrl}")`;
+                } else {
+                    document.body.style.backgroundImage = `url("${unsplash.lowResUrl}")`;
+                    imgLoader.onload = () => {
+                        document.body.style.backgroundImage = `url("${unsplash.highResUrl}")`;
+                    };
+                    imgLoader.onerror = async () => {
+                        await applyCustomOrFallbackBackground(idArray, true);
+                    };
+                }
+                return;
+            } else {
+                // Unsplash falhou (servidor indisponível, limite atingido ou offline)
+                // Apenas se o Unsplash falhou E a lista estiver vazia, carrega as imagens padrão de fallback!
+                await applyCustomOrFallbackBackground(idArray, true);
+                return;
+            }
+        }
+
+        // Caso Unsplash esteja desligado pelo usuário:
+        // Usa apenas os backgrounds do usuário. Se a lista estiver vazia, não força recarregar padrões.
+        await applyCustomOrFallbackBackground(idArray, false);
+    }
+
+    async function applyCustomOrFallbackBackground(idArray, isUnsplashFallback) {
+        // Apenas se o Unsplash falhou E a lista está vazia, carrega as imagens padrão de fallback
+        if (isUnsplashFallback && idArray.length === 0) {
+            console.log('Unsplash falhou e lista vazia. Carregando backgrounds padrão de fallback.');
+            await loadDefaultBackgrounds();
+            idArray = await getIdArray();
+        }
+
         if (idArray.length > 0) {
             console.log('Loading Customized Background.');
 
             const index = await getImageIndex(idArray.length);
             const backImg = await getBackground(idArray[index - 1]);
 
-            document.body.style.backgroundImage = `url('${backImg}')`;
-            loadImageDisplay(idArray);
+            if (backImg) {
+                document.body.style.backgroundImage = `url("${backImg}")`;
+            }
+        } else {
+            document.body.style.backgroundImage = 'none';
         }
     }
 
     async function loadDefaultBackgrounds() {
-        const totalDeImagens = 24;
+        const totalDeImagens = 12;
         for (let i = 0; i < totalDeImagens; i++) {
             await addBackground(`img/${i}.jpg`);
         }
@@ -81,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await chrome.storage.local.get(['idArray']);
         let idArrayB = result.idArray || [];
 
-        const id = 'bg_' + idArrayB.length;
+        const id = 'bg_' + generateId();
         idArrayB.push(id);
 
         await chrome.storage.local.set({ idArray: idArrayB });
@@ -123,9 +189,34 @@ document.addEventListener('DOMContentLoaded', () => {
     let GRID_COLS = 8;
     let gridArray = [];
 
+    // Gerenciamento de Ícones Customizados no storage local (evita estourar cota do storage.sync)
+    async function saveCustomIcon(linkId, base64) {
+        const res = await chrome.storage.local.get({ customIcons: {} });
+        const customIcons = res.customIcons || {};
+        if (base64) {
+            customIcons[linkId] = base64;
+        } else {
+            delete customIcons[linkId];
+        }
+        await chrome.storage.local.set({ customIcons });
+    }
+
+    async function getCustomIcon(linkId) {
+        const res = await chrome.storage.local.get({ customIcons: {} });
+        return res.customIcons?.[linkId] || null;
+    }
+
+    async function removeCustomIcon(linkId) {
+        const res = await chrome.storage.local.get({ customIcons: {} });
+        if (res.customIcons && res.customIcons[linkId]) {
+            delete res.customIcons[linkId];
+            await chrome.storage.local.set({ customIcons: res.customIcons });
+        }
+    }
+
     // Grid configuration
     async function gridConfiguration() {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             chrome.storage.sync.get(['grid', 'links'], (result) => {
                 if (result.grid) {
                     GRID_COLS = result.grid.col;
@@ -148,19 +239,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!gridContainer) return;
 
         const LINK_SIZE = Math.floor(sizeLink * 16);
-
         gridContainer.style.maxWidth = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
-        // gridContainer.innerHTML = ''; // Be careful clearing this if calling multiple times, but ok for init
+        updateSameCornerWidth();
     }
 
-    // --- FIX: Completely rewritten renderLink to fix scope and icon logic ---
-    async function renderLink(name, url, customIcon, icone, id) {
+    async function renderLink(name, url, customIcon, icone, id, hasCustomIcon) {
         const fullUrl = url?.startsWith('http') ? url : ('https://' + (url || ''));
         const finalId = id || generateId(); // Ensure ID exists
-        const iconId = "icon_" + finalId;
-
         let hostname;
         try { hostname = new URL(fullUrl).hostname; } catch (e) { hostname = url || ''; }
+        const iconId = `icon_${hostname}`; // Keyed by hostname to update automatically on URL change
 
         const newLink = document.createElement('a');
         newLink.href = fullUrl;
@@ -168,9 +256,17 @@ document.addEventListener('DOMContentLoaded', () => {
         newLink.dataset.name = name;
         newLink.dataset.id = finalId;
         
-        // Store customIcon in dataset so it persists when saving grid later
-        if (customIcon) newLink.dataset.customIcon = customIcon;
-        if (icone) newLink.dataset.icone = icone;
+        let effectiveCustomIcon = customIcon;
+        if (!effectiveCustomIcon && (hasCustomIcon || icone)) {
+            effectiveCustomIcon = await getCustomIcon(finalId);
+            if (!effectiveCustomIcon && icone) {
+                effectiveCustomIcon = icone;
+            }
+        }
+
+        if (effectiveCustomIcon) {
+            newLink.dataset.hasCustomIcon = 'true';
+        }
 
         // Image Element
         const iconImg = document.createElement('img');
@@ -181,11 +277,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const fallbackIcon = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="100%" height="100%" fill="#444"/><text x="50%" y="55%" font-size="20" text-anchor="middle" fill="#fff" font-family="Arial,sans-serif">?</text></svg>';
         iconImg.onerror = () => { iconImg.src = fallbackIcon; };
 
-        // LOGIC: Custom Icon -> Legacy 'icone' -> Cached Favicon -> Fetch New Favicon
-        if (customIcon) {
-            iconImg.src = customIcon;
-        } else if (icone) {
-            iconImg.src = icone;
+        // LOGIC: Custom Icon -> Cached Favicon -> Fetch New Favicon
+        if (effectiveCustomIcon) {
+            iconImg.src = effectiveCustomIcon;
         } else {
             // Check local storage for cached favicon
             iconImg.src = fallbackIcon; // Temporary placeholder
@@ -194,16 +288,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (res.icons && res.icons[iconId]) {
                     // Found in cache
                     iconImg.src = res.icons[iconId];
-                } else {
+                } else if (hostname) {
                     // Not found, fetch it
                     try {
                         const base64 = await faviconToBase64(hostname);
                         if (base64) {
                             iconImg.src = base64;
-                            // Save to cache
-                            const icons = res.icons || {};
+                            // Save to cache garantindo leitura do estado mais recente
+                            const cur = await chrome.storage.local.get({ icons: {} });
+                            const icons = cur.icons || {};
                             icons[iconId] = base64;
-                            chrome.storage.local.set({ icons });
+                            await chrome.storage.local.set({ icons });
                         }
                     } catch (err) {
                         console.log("Error fetching favicon", err);
@@ -235,14 +330,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await chrome.storage.sync.get('links');
         const links = result.links || [];
 
+        // Migração de ícones customizados legados salvos no sync para o storage local
+        let migratedAny = false;
+        const resLocal = await chrome.storage.local.get({ customIcons: {} });
+        const customIcons = resLocal.customIcons || {};
+
         for (const link of links) {
-            const linkEl = await renderLink(link.name, link.url, link.customIcon, link.icone, link.id);
+            if (link.customIcon && typeof link.customIcon === 'string' && link.customIcon.startsWith('data:')) {
+                customIcons[link.id] = link.customIcon;
+                link.hasCustomIcon = true;
+                delete link.customIcon;
+                migratedAny = true;
+            }
+            if (link.icone && typeof link.icone === 'string' && link.icone.startsWith('data:')) {
+                customIcons[link.id] = link.icone;
+                link.hasCustomIcon = true;
+                delete link.icone;
+                migratedAny = true;
+            }
+            const linkEl = await renderLink(link.name, link.url, null, null, link.id, link.hasCustomIcon);
             gridContainer.appendChild(linkEl);
         }
-    }
 
-    // NOTE: Removed 'addLink' function as it created a race condition with the Save inside Form Submit.
-    // We now update DOM -> Then Save DOM state.
+        if (migratedAny) {
+            await chrome.storage.local.set({ customIcons });
+            await chrome.storage.sync.set({ links });
+            console.log("Migrated custom icons from sync to local storage.");
+        }
+    }
 
     function generateId() {
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -259,7 +374,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const link = linkElement.closest('.quick-link');
         if (!link) return hideContextMenu();
 
+        const id = link.dataset.id;
         link.remove();
+
+        if (id) {
+            removeCustomIcon(id);
+        }
 
         chrome.storage.sync.set({ links: getLinksFromGrid() }, () => {
             hideContextMenu();
@@ -288,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!link) return;
         editingLink = link;
         editingId = link.dataset.id;
-        console.log('edit log: ', editingId)
+        console.log('edit log: ', editingId);
 
         isEditing = true;
         activeLink = linkElement;
@@ -305,8 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
             id: item.dataset.id,
             name: item.dataset.name,
             url: item.href,
-            customIcon: item.dataset.customIcon || null,
-            icone: item.dataset.icone || null // Preserve legacy icon data if exists
+            hasCustomIcon: item.dataset.hasCustomIcon === 'true'
         }));
     }
 
@@ -348,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pull: false,
                 put: false
             },
-            onEnd: function (evt) {
+            onEnd: function () {
                 chrome.storage.sync.set({ links: getLinksFromGrid() });
             }
         });
@@ -406,14 +525,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isEditing && editingId) {
             // EDIT MODE
-            const existing = await getLinkById(editingId) || {};
-            
-            // Note: We don't save to array here, we rely on DOM replacement + final save
-            const updatedCustomIcon = customIcon || existing.customIcon || null;
-            const updatedIcone = existing.icone || null;
+            const existingCustomIcon = await getCustomIcon(editingId);
+            const updatedCustomIcon = customIcon || existingCustomIcon || null;
+
+            if (customIcon) {
+                await saveCustomIcon(editingId, customIcon);
+            }
+
+            // Remove o ícone em cache para que a alteração de URL ou recarregamento busque o favicon novo
+            let editedHostname;
+            try { editedHostname = new URL(siteUrl).hostname; } catch (e) { editedHostname = siteUrl || ''; }
+            if (editedHostname) {
+                const cur = await chrome.storage.local.get({ icons: {} });
+                const icons = cur.icons || {};
+                delete icons[`icon_${editedHostname}`];
+                await chrome.storage.local.set({ icons });
+            }
 
             // Render new element
-            const newEl = await renderLink(siteName, siteUrl, updatedCustomIcon, updatedIcone, editingId);
+            const newEl = await renderLink(siteName, siteUrl, updatedCustomIcon, null, editingId, Boolean(updatedCustomIcon));
             
             // Replace in DOM
             if (editingLink && editingLink.parentNode) {
@@ -429,15 +559,16 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // NEW LINK MODE
             const id = generateId();
+            if (customIcon) {
+                await saveCustomIcon(id, customIcon);
+            }
             
             // Create DOM Element
-            const linkEl = await renderLink(siteName, siteUrl, customIcon, null, id);
+            const linkEl = await renderLink(siteName, siteUrl, customIcon, null, id, Boolean(customIcon));
             gridContainer.appendChild(linkEl);
         }
 
         // --- FINAL SAVE ---
-        // Scrapes the current state of the DOM and saves it. 
-        // This prevents race conditions between "addLink" and "renderLink".
         chrome.storage.sync.set({ links: getLinksFromGrid() }, () => {
             hideOverlay();
             form.reset();
@@ -469,8 +600,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const buttonCenterX = rect.left + (rect.width / 2);
         const buttonCenterY = rect.top + (rect.height / 2);
 
-        const viewportWidth = window.innerWidth
-        const viewportHeight = window.innerHeight
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
 
         const circle1Bottom = (viewportHeight - buttonCenterY) - (rectCircle1.height / 2);
         const circle1Right = (viewportWidth - buttonCenterX) - (rectCircle1.width / 2);
@@ -529,11 +660,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearListBtn = document.getElementById('clear-list-btn');
     const linkSizeInput = document.getElementById('link-size-input');
     const widthCheckbox = document.getElementById('width-checkbox');
+    const unsplashCheckbox = document.getElementById('unsplash-checkbox');
+    const customBgSection = document.getElementById('custom-bg-section');
+    const clockCheckbox = document.getElementById('clock-checkbox');
+    const clockPositionGrid = document.getElementById('clock-position-grid');
 
     const openMenu = () => {
         hideOverlay();
         backdrop.style.display = 'block';
         settingsMenu.style.display = 'flex';
+        updatePositionButtonsUI();
     };
 
     const closeMenu = () => {
@@ -543,7 +679,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const resetLinks = () => {
         if (confirm('Are you sure you want to reset all links? This action cannot be undone.')) {
-            chrome.storage.sync.set({ links: [] }, () => {
+            chrome.storage.sync.set({ links: [] }, async () => {
+                await chrome.storage.local.set({ customIcons: {} });
                 loadLinks();
                 closeMenu();
                 showNotification("Success. All links have been reset.");
@@ -551,14 +688,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    const exportLinks = () => {
-        chrome.storage.sync.get(['links'], (result) => {
-            var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(result.links));
-            var dlAnchorElem = document.getElementById('downloadAnchorElem');
-            dlAnchorElem.setAttribute("href", dataStr);
-            dlAnchorElem.setAttribute("download", "websiteLinks.json");
-            dlAnchorElem.click();
-        });
+    const exportLinks = async () => {
+        const syncRes = await chrome.storage.sync.get(['links']);
+        const links = syncRes.links || [];
+        const localRes = await chrome.storage.local.get({ customIcons: {} });
+        const customIcons = localRes.customIcons || {};
+
+        const exportData = links.map(link => ({
+            ...link,
+            customIcon: customIcons[link.id] || null
+        }));
+
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+        const dlAnchorElem = document.getElementById('downloadAnchorElem');
+        dlAnchorElem.setAttribute("href", dataStr);
+        dlAnchorElem.setAttribute("download", "websiteLinks.json");
+        dlAnchorElem.click();
     };
 
     const importLinks = () => {
@@ -567,19 +712,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const importLinksInput = () => {
         const files = fileInput.files;
-        if (files.length === 0) return false;
+        if (!files || files.length === 0) return false;
 
         const fr = new FileReader();
-        fr.onload = () => {
+        fr.onload = async () => {
             try {
                 const linksJson = JSON.parse(fr.result);
-                chrome.storage.sync.set({ links: linksJson }, () => {
-                    loadLinks();
-                    closeMenu();
-                    fileInput.value = '';
-                });
+                if (!Array.isArray(linksJson)) {
+                    throw new Error("Invalid format: expected array of links");
+                }
+
+                const localRes = await chrome.storage.local.get({ customIcons: {} });
+                const customIcons = localRes.customIcons || {};
+
+                const sanitizedLinks = [];
+                for (const item of linksJson) {
+                    if (!item || !item.url) continue;
+                    const id = item.id || generateId();
+                    const hasCustom = Boolean(item.customIcon || item.hasCustomIcon);
+
+                    if (item.customIcon && typeof item.customIcon === 'string' && item.customIcon.startsWith('data:')) {
+                        customIcons[id] = item.customIcon;
+                    }
+
+                    sanitizedLinks.push({
+                        id,
+                        name: item.name || item.url,
+                        url: item.url,
+                        hasCustomIcon: hasCustom
+                    });
+                }
+
+                await chrome.storage.local.set({ customIcons });
+                await chrome.storage.sync.set({ links: sanitizedLinks });
+
+                await loadLinks();
+                closeMenu();
+                fileInput.value = '';
+                showNotification("Success. Links imported successfully");
             } catch (err) {
                 console.error("Invalid JSON file:", err);
+                showNotification("Error: Invalid JSON file");
             }
         };
         fr.readAsText(files[0]);
@@ -626,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pull: false,
                 put: false
             },
-            onEnd: function (evt) {
+            onEnd: function () {
                 chrome.storage.local.set({ idArray: getLinksFromDisplayArray() });
             }
         });
@@ -646,13 +819,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function addDisplayImage(idArray) {
-        const imgSrc = await getBackground(idArray);
+    async function addDisplayImage(id) {
+        const imgSrc = await getBackground(id);
 
         const divElem = document.createElement('div');
         divElem.style.position = 'relative';
         divElem.className = 'div-display';
-        divElem.id = idArray;
+        divElem.id = id;
 
         const aElem = document.createElement('button');
         aElem.className = 'img-display-a';
@@ -680,8 +853,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const resetBg = async () => {
         if (confirm('Are you sure you want to reset the backgrounds? This action cannot be undone.')) {
-            resetBack();
-            showNotification("Success. Background reseted successfully");
+            await resetBack();
+            showNotification("Success. Background reset successfully");
         }
     }
 
@@ -714,7 +887,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await chrome.storage.local.set({ idArray: idArrayB });
         chrome.storage.local.remove(id);
         removeDisplayImage(id);
-    };
+    }
 
     function setGridDefaults() {
         chrome.storage.sync.get(['grid'], (result) => {
@@ -755,7 +928,6 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.col = value;
 
         chrome.storage.sync.set({ grid });
-        // gridContainer.innerHTML = ''; // This is done inside loadLinks
         await loadLinks();
         initSortable();
     }
@@ -771,7 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const clearBg = async () => {
         await clearBgList();
-        await loadBackground();
+        document.body.style.backgroundImage = 'none';
         showNotification('Success. Background list cleared successfully');
         if(displayContainer) displayContainer.innerHTML = '';
     }
@@ -790,6 +962,7 @@ document.addEventListener('DOMContentLoaded', () => {
         GRID_COLS = result.grid.col || 8;
         const LINK_SIZE = Math.ceil(sizeLink) * 16;
         gridContainer.style.maxWidth = `${(GRID_COLS * LINK_SIZE + (GRID_COLS * 10))}px`;
+        updateSameCornerWidth();
     }
 
     async function setLinkSize() {
@@ -806,66 +979,241 @@ document.addEventListener('DOMContentLoaded', () => {
         return result.linkSize || 7;
     }
 
-    document.querySelectorAll(".position-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            switch (btn.dataset.position) {
-                case "top-left":
-                    document.documentElement.style.setProperty("--link-container-vertical", "flex-start");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "flex-start");
-                    break;
-                case "top-center":
-                    document.documentElement.style.setProperty("--link-container-vertical", "flex-start");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "center");
-                    break;
-                case "top-right":
-                    document.documentElement.style.setProperty("--link-container-vertical", "flex-start");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "flex-end");
-                    break;
-                case "left":
-                    document.documentElement.style.setProperty("--link-container-vertical", "center");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "flex-start");
-                    break;
-                case "center":
-                    document.documentElement.style.setProperty("--link-container-vertical", "center");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "center");
-                    break;
-                case "right":
-                    document.documentElement.style.setProperty("--link-container-vertical", "center");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "flex-end");
-                    break;
-                case "bottom-left":
-                    document.documentElement.style.setProperty("--link-container-vertical", "flex-end");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "flex-start");
-                    break;
-                case "bottom-center":
-                    document.documentElement.style.setProperty("--link-container-vertical", "flex-end");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "center");
-                    break;
-                case "bottom-right":
-                    document.documentElement.style.setProperty("--link-container-vertical", "flex-end");
-                    document.documentElement.style.setProperty("--link-container-horizontal", "flex-end");
-                    break;
-            }
-            setPosition();
-        });
-    });
-
-    async function setPosition() {
-        const vertical = document.documentElement.style.getPropertyValue("--link-container-vertical");
-        const horizontal = document.documentElement.style.getPropertyValue("--link-container-horizontal");
-        chrome.storage.sync.set({ linkPosition: { ver: vertical, hor: horizontal } });
+    // ==========================================================================
+    // CLOCK COMPONENT
+    // ==========================================================================
+    function initClock() {
+        updateClock();
+        setInterval(updateClock, 1000);
     }
 
-    async function getPosition() {
-        const result = await chrome.storage.sync.get('linkPosition');
-        return result.linkPosition || { ver: "flex-start", hor: "flex-start" }
+    function updateClock() {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const timeElem = document.getElementById('clock-time');
+
+        if (timeElem) timeElem.textContent = `${hours}:${minutes}`;
+    }
+
+    async function getEnableClock() {
+        const result = await chrome.storage.sync.get('enableClock');
+        return result.enableClock !== undefined ? result.enableClock : true;
+    }
+
+    function updateClockUI(isEnabled) {
+        if (clockCheckbox) {
+            clockCheckbox.checked = isEnabled;
+        }
+        if (clockPositionGrid) {
+            if (isEnabled) {
+                clockPositionGrid.classList.remove('disabled-section');
+            } else {
+                clockPositionGrid.classList.add('disabled-section');
+            }
+        }
+    }
+
+    const toggleClock = async () => {
+        const isEnabled = clockCheckbox ? clockCheckbox.checked : true;
+        await chrome.storage.sync.set({ enableClock: isEnabled });
+        updateClockUI(isEnabled);
+        updateLayout(currentLinkPos, currentClockPos);
+    };
+
+    function updateSameCornerWidth() {
+        const sameCorner = document.getElementById('same-corner-container');
+        const grid = document.getElementById('grid-container');
+        if (sameCorner && grid && grid.style.maxWidth) {
+            sameCorner.style.width = grid.style.maxWidth;
+            sameCorner.style.maxWidth = grid.style.maxWidth;
+        }
+    }
+
+    // ==========================================================================
+    // POSITIONING & LAYOUT SYSTEM (Clock & Links)
+    // ==========================================================================
+    const posFlexMap = {
+        'top-left': { ver: 'flex-start', hor: 'flex-start' },
+        'top-center': { ver: 'flex-start', hor: 'center' },
+        'top-right': { ver: 'flex-start', hor: 'flex-end' },
+        'left': { ver: 'center', hor: 'flex-start' },
+        'center': { ver: 'center', hor: 'center' },
+        'right': { ver: 'center', hor: 'flex-end' },
+        'bottom-left': { ver: 'flex-end', hor: 'flex-start' },
+        'bottom-center': { ver: 'flex-end', hor: 'center' },
+        'bottom-right': { ver: 'flex-end', hor: 'flex-end' }
+    };
+
+    function normalizePosition(pos) {
+        if (!pos) return null;
+        if (typeof pos === 'string') return pos;
+        const { ver, hor } = pos;
+        if (ver === 'flex-start') {
+            if (hor === 'flex-start') return 'top-left';
+            if (hor === 'center') return 'top-center';
+            if (hor === 'flex-end') return 'top-right';
+        } else if (ver === 'center') {
+            if (hor === 'flex-start') return 'left';
+            if (hor === 'center') return 'center';
+            if (hor === 'flex-end') return 'right';
+        } else if (ver === 'flex-end') {
+            if (hor === 'flex-start') return 'bottom-left';
+            if (hor === 'center') return 'bottom-center';
+            if (hor === 'flex-end') return 'bottom-right';
+        }
+        return 'top-left';
+    }
+
+    let currentLinkPos = 'top-left';
+    let currentClockPos = 'top-right';
+
+    function updateLayout(linkPos, clockPos) {
+        currentLinkPos = linkPos || 'top-left';
+        currentClockPos = clockPos || 'top-right';
+
+        const boxed = document.querySelector('.boxed');
+        const clockContainer = document.getElementById('clock-container');
+        const linksContainer = document.getElementById('links-container');
+        if (!boxed || !clockContainer || !linksContainer) return;
+
+        // Safely detach components before clearing old containers
+        const frag = document.createDocumentFragment();
+        frag.appendChild(clockContainer);
+        frag.appendChild(linksContainer);
+
+        boxed.querySelectorAll('.corner-container').forEach(c => c.remove());
+
+        const isClockEnabled = clockCheckbox ? clockCheckbox.checked : true;
+        const addLinkBtn = document.getElementById('add-link-btn');
+
+        if (!isClockEnabled) {
+            // Relógio desativado: esconde relógio e mantém links no seu canto
+            clockContainer.style.display = 'none';
+
+            if (currentLinkPos === currentClockPos) {
+                const sameCornerDiv = document.createElement('div');
+                sameCornerDiv.id = 'same-corner-container';
+                sameCornerDiv.className = `corner-container same-corner pos-${currentLinkPos}`;
+
+                const grid = document.getElementById('grid-container');
+                if (grid && grid.style.maxWidth) {
+                    sameCornerDiv.style.width = grid.style.maxWidth;
+                    sameCornerDiv.style.maxWidth = grid.style.maxWidth;
+                }
+
+                sameCornerDiv.appendChild(clockContainer);
+                sameCornerDiv.appendChild(linksContainer);
+
+                boxed.insertBefore(sameCornerDiv, addLinkBtn || boxed.firstChild);
+            } else {
+                const clockCornerDiv = document.createElement('div');
+                clockCornerDiv.id = 'clock-corner-container';
+                clockCornerDiv.className = `corner-container pos-${currentClockPos}`;
+                clockCornerDiv.style.display = 'none';
+                clockCornerDiv.appendChild(clockContainer);
+
+                const linksCornerDiv = document.createElement('div');
+                linksCornerDiv.id = 'links-corner-container';
+                linksCornerDiv.className = `corner-container pos-${currentLinkPos}`;
+                linksCornerDiv.appendChild(linksContainer);
+
+                boxed.insertBefore(linksCornerDiv, addLinkBtn || boxed.firstChild);
+                boxed.insertBefore(clockCornerDiv, addLinkBtn || boxed.firstChild);
+            }
+        } else {
+            // Relógio ativado
+            clockContainer.style.display = 'flex';
+
+            if (currentLinkPos === currentClockPos) {
+                // Mesmo canto: div compartilhada com a mesma largura calculada da div dos links
+                const sameCornerDiv = document.createElement('div');
+                sameCornerDiv.id = 'same-corner-container';
+                sameCornerDiv.className = `corner-container same-corner pos-${currentLinkPos}`;
+
+                const grid = document.getElementById('grid-container');
+                if (grid && grid.style.maxWidth) {
+                    sameCornerDiv.style.width = grid.style.maxWidth;
+                    sameCornerDiv.style.maxWidth = grid.style.maxWidth;
+                }
+
+                sameCornerDiv.appendChild(clockContainer);
+                sameCornerDiv.appendChild(linksContainer);
+
+                boxed.insertBefore(sameCornerDiv, addLinkBtn || boxed.firstChild);
+            } else {
+                // Cantos diferentes
+                const clockCornerDiv = document.createElement('div');
+                clockCornerDiv.id = 'clock-corner-container';
+                clockCornerDiv.className = `corner-container pos-${currentClockPos}`;
+                clockCornerDiv.appendChild(clockContainer);
+
+                const linksCornerDiv = document.createElement('div');
+                linksCornerDiv.id = 'links-corner-container';
+                linksCornerDiv.className = `corner-container pos-${currentLinkPos}`;
+                linksCornerDiv.appendChild(linksContainer);
+
+                boxed.insertBefore(linksCornerDiv, addLinkBtn || boxed.firstChild);
+                boxed.insertBefore(clockCornerDiv, addLinkBtn || boxed.firstChild);
+            }
+        }
+
+        updatePositionButtonsUI();
+        initSortable();
+        updateSameCornerWidth();
+    }
+
+    function updatePositionButtonsUI() {
+        document.querySelectorAll('#links-position-grid .position-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.position === currentLinkPos);
+        });
+        document.querySelectorAll('#clock-position-grid .clock-position-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.position === currentClockPos);
+        });
+    }
+
+    function setLinkPosition(newPos) {
+        currentLinkPos = newPos;
+        if (posFlexMap[newPos]) {
+            document.documentElement.style.setProperty("--link-container-vertical", posFlexMap[newPos].ver);
+            document.documentElement.style.setProperty("--link-container-horizontal", posFlexMap[newPos].hor);
+        }
+        chrome.storage.sync.set({ linkPosition: newPos });
+        updateLayout(currentLinkPos, currentClockPos);
+    }
+
+    function setClockPosition(newPos) {
+        currentClockPos = newPos;
+        chrome.storage.sync.set({ clockPosition: newPos });
+        updateLayout(currentLinkPos, currentClockPos);
     }
 
     async function loadPosition() {
-        const position = await getPosition();
-        document.documentElement.style.setProperty("--link-container-vertical", position.ver);
-        document.documentElement.style.setProperty("--link-container-horizontal", position.hor);
+        const result = await chrome.storage.sync.get(['linkPosition', 'clockPosition', 'enableClock']);
+        currentLinkPos = normalizePosition(result.linkPosition) || 'top-left';
+        currentClockPos = normalizePosition(result.clockPosition) || 'top-right';
+        const isClockEnabled = result.enableClock !== undefined ? result.enableClock : true;
+        updateClockUI(isClockEnabled);
+
+        if (posFlexMap[currentLinkPos]) {
+            document.documentElement.style.setProperty("--link-container-vertical", posFlexMap[currentLinkPos].ver);
+            document.documentElement.style.setProperty("--link-container-horizontal", posFlexMap[currentLinkPos].hor);
+        }
+
+        updateLayout(currentLinkPos, currentClockPos);
     }
+
+    document.querySelectorAll('#links-position-grid .position-btn').forEach(btn => {
+        btn.addEventListener("click", () => {
+            setLinkPosition(btn.dataset.position);
+        });
+    });
+
+    document.querySelectorAll('#clock-position-grid .clock-position-btn').forEach(btn => {
+        btn.addEventListener("click", () => {
+            setClockPosition(btn.dataset.position);
+        });
+    });
 
     const fullWidth = () => {
         if (widthCheckbox.checked) {
@@ -884,22 +1232,53 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function getFullWidth() {
         const result = await chrome.storage.sync.get('fullWidth');
-        return result.fullWidth || true;
+        return result.fullWidth !== undefined ? result.fullWidth : true;
     }
 
     async function loadFullWidth() {
         const isFullWidth = await getFullWidth();
-        const fullWidth = isFullWidth ? "100%" : "1920px"
+        const fullWidth = isFullWidth ? "100%" : "1920px";
         widthCheckbox.checked = isFullWidth;
         document.documentElement.style.setProperty("--box-width", fullWidth);
     }
 
-    async function faviconToBase64(hostname) {
+    async function faviconToBase64(hostname, size = 128) {
         return chrome.runtime.sendMessage({
             action: "fetchFavicon",
-            hostname
+            hostname,
+            size
         });
     }
+
+    async function getUseUnsplash() {
+        const result = await chrome.storage.sync.get('useUnsplash');
+        return result.useUnsplash !== undefined ? result.useUnsplash : true;
+    }
+
+    function updateBgSettingsUI(isUnsplash) {
+        if (customBgSection) {
+            if (isUnsplash) {
+                customBgSection.classList.add('disabled-section');
+            } else {
+                customBgSection.classList.remove('disabled-section');
+            }
+        }
+        if (unsplashCheckbox) {
+            unsplashCheckbox.checked = isUnsplash;
+        }
+    }
+
+    async function loadUnsplashSetting() {
+        const isUnsplash = await getUseUnsplash();
+        updateBgSettingsUI(isUnsplash);
+    }
+
+    const toggleUnsplash = async () => {
+        const isEnabled = unsplashCheckbox.checked;
+        await chrome.storage.sync.set({ useUnsplash: isEnabled });
+        updateBgSettingsUI(isEnabled);
+        await loadBackground();
+    };
 
     init();
 
@@ -909,7 +1288,7 @@ document.addEventListener('DOMContentLoaded', () => {
     backdrop.addEventListener('click', closeMenu);
     exportLinksBtn.addEventListener('click', exportLinks);
     changeBgBtn.addEventListener('click', changeBgButton);
-    changeBgInput.addEventListener('change', changeBg)
+    changeBgInput.addEventListener('change', changeBg);
     importLinksBtn.addEventListener('click', importLinks);
     fileInput.addEventListener('change', importLinksInput);
     resetBgBtn.addEventListener('click', resetBg);
@@ -921,5 +1300,11 @@ document.addEventListener('DOMContentLoaded', () => {
     clearListBtn.addEventListener('click', clearBg);
     linkSizeInput.addEventListener('input', linkSize);
     widthCheckbox.addEventListener('change', fullWidth);
+    if (unsplashCheckbox) {
+        unsplashCheckbox.addEventListener('change', toggleUnsplash);
+    }
+    if (clockCheckbox) {
+        clockCheckbox.addEventListener('change', toggleClock);
+    }
 
 });
